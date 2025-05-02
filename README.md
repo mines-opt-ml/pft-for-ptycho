@@ -45,6 +45,10 @@ Large-Scale PIE Experiment
 ```
 python PIE_driver.py
 ```
+or
+```
+python non_blind_experiment_large_scale.py
+```
 
 PIE Relative Errors Experiment
 ```
@@ -55,6 +59,10 @@ python nonblind_rel_err_experiments.py
 Large-Scale ePIE Experiment
 ```
 python ePIE_driver.py
+```
+or
+```
+python ePIE_driver_large_scale.py
 ```
 
 ePIE Relative Errors Experiment
