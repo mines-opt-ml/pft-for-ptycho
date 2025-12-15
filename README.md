@@ -11,7 +11,7 @@ of the PFT found in https://github.com/snudatalab/PFT originally implemented in 
 ## Associated Publications
 
 ### Fast Partial Fourier Transforms for Large-Scale Ptychography
-Full-Paper: available soon
+Full-Paper: https://www.aimsciences.org/article/doi/10.3934/ipi.2025019
 
 Pre-Print: https://arxiv.org/abs/2408.03532
 
