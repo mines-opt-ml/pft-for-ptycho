@@ -317,7 +317,7 @@ def f_single_probe(z, Q, b, current_ap, lmbda = 0, return_gradient=False):
 
 
 def f_pft(z, Q, b, current_ap, lmbda=0.005, return_gradient=False, B=None, M=None, p=None, q=None,
-          m1_mod=None, m2_mod=None, precomputed_prod=None):
+          m1_mod=None, m2_mod=None, F1=None, F2=None):
     """
     Computes the objective function value and optionally its gradients for a single probe using the Partial Fourier Transform (PFT).
 
@@ -334,7 +334,8 @@ def f_pft(z, Q, b, current_ap, lmbda=0.005, return_gradient=False, B=None, M=Non
         q (list of int): Quotients of N and p for each dimension.
         m1_mod (torch.Tensor): Modulo values for the first dimension.
         m2_mod (torch.Tensor): Modulo values for the second dimension.
-        precomputed_prod (torch.Tensor): Precomputed product of exponential terms and powers for both dimensions.
+        F1 (torch.Tensor): Tensor of shape (L1, r1) containing precomputed factors for the first dimension.
+        F2 (torch.Tensor): Tensor of shape (L2, r2) containing precomputed factors for the second dimension.
 
     Returns:
         torch.Tensor: The average objective function value for the single probe application.
@@ -355,7 +356,7 @@ def f_pft(z, Q, b, current_ap, lmbda=0.005, return_gradient=False, B=None, M=Non
 
     z_temp = Q*z
     z_temp = z_temp.view(p[0], q[0], p[1], q[1]).permute(0, 2, 1, 3).contiguous().view(p[0], p[1], q[0], q[1])
-    pft_z = pft2d_computation(z_temp, B, m1_mod, m2_mod, precomputed_prod, device=device)
+    pft_z = pft2d_computation(z_temp, B, m1_mod, m2_mod, F1, F2, device=device)
 
     proj_z = b[current_ap].view(2*M[0], 2*M[1]) * torch.exp(1j*torch.angle(ifftshift(pft_z)))
     

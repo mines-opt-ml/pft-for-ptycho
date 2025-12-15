@@ -4,7 +4,7 @@ import torch.fft
 import numpy as np
 import csv
 
-def pft2d_configuration(N, M, mu, p, error, device='cpu'): 
+def pft2d_configuration(N, M, mu, p, error, device='cpu', dtype=torch.complex64): 
     """
     Configure the 2D Partial Fourier Transform (PFT) by precomputing necessary parameters.
 
@@ -62,11 +62,11 @@ def pft2d_configuration(N, M, mu, p, error, device='cpu'):
     
         B_temp = exponent_term * W * coefficients
 
-        B[d] = B_temp
+        B[d] = B_temp.to(dtype)
     
     return B, p, q, r
 
-def pft2d_precompute(Z, M, mu, p, q, r, device='cpu'):
+def pft2d_precompute(Z, M, mu, p, q, r, *, device='cpu', dtype=torch.complex64):
     """
     Precompute values needed for the 2D Partial Fourier Transform (PFT) computation.
 
@@ -74,56 +74,84 @@ def pft2d_precompute(Z, M, mu, p, q, r, device='cpu'):
     which are used in the actual PFT computation to improve efficiency.
 
     Parameters:
-        Z (torch.Tensor): Input tensor to be transformed, size `N1 x N2`.
-        M (list of int): Crop size M1 and M2 for the PFT along each dimension.
-        mu (list of int): Centering for the PFT.
-        p (list of int): Divisors p1 and p2 of N1 and N2, respectively.
-        q (list of int): Quotients of N and p for each dimension.
-        r (list of int): Precomputed r values for each dimension, based on error tolerance.
-        device (str): Device to perform the computations on ('cpu' or 'cuda').
+        Z (torch.Tensor):
+            Input tensor of size (N1, N2), possibly real or complex.
+        M (list[int]):
+            Half-widths [M1, M2] of the frequency crop in each dimension.
+            The resulting frequency ranges have lengths 2*M1+1 and 2*M2+1.
+        mu (list[int]):
+            Frequency centers [mu1, mu2] for the PFT.
+        p (list[int]):
+            Divisors [p1, p2] of N1 and N2, respectively.
+        q (list[int]):
+            Quotients [q1, q2] such that N_d = p_d * q_d.
+        r (list[int]):
+            Truncation orders [r1, r2] for the Taylor expansions in each dimension.
+        device (str or torch.device, optional):
+            Device on which to perform computations. Defaults to Z.device.
+        dtype (torch.dtype, optional):
+            Complex dtype used for returned factors (default: torch.complex64).
 
     Returns:
-        Z (torch.Tensor): Reshaped input tensor to be used in the PFT computation.
-        m1_mod (torch.Tensor): Modulo values for m1, corresponding to the first dimension.
-        m2_mod (torch.Tensor): Modulo values for m2, corresponding to the second dimension.
-        precomputed_prod (torch.Tensor): Precomputed product of exponential terms and 
-                                         powers of `(m - mu)/p` for both dimensions, to be used in the PFT.
+        Z (torch.Tensor):
+            Reshaped input tensor of shape (p1, p2, q1, q2), to be used in the PFT.
+        m1_mod (torch.Tensor):
+            1D tensor of length L1 = 2*M1+1 containing modulo-p1 indices
+            for the first dimension.
+        m2_mod (torch.Tensor):
+            1D tensor of length L2 = 2*M2+1 containing modulo-p2 indices
+            for the second dimension.
+        F1 (torch.Tensor):
+            Tensor of shape (L1, r1) containing precomputed weights
+            ((m1 - mu1)/p1)^j * exp(-pi i m1 / p1) for the first dimension.
+        F2 (torch.Tensor):
+            Tensor of shape (L2, r2) containing precomputed weights
+            ((m2 - mu2)/p2)^j * exp(-pi i m2 / p2) for the second dimension.
     """
     
-    Z = Z.view(p[0], q[0], p[1], q[1]).permute(0, 2, 1, 3).contiguous().view(p[0], p[1], q[0], q[1])  
-
-    # Calculate m1 and m2 ranges
-    m1_range = torch.arange(mu[0] - M[0], mu[1] + M[0]).to(device)
-    m2_range = torch.arange(mu[0] - M[1], mu[1] + M[1]).to(device)
-
-    # Create grids for m1 and m2
-    m1_grid, m2_grid = torch.meshgrid(m1_range, m2_range, indexing='ij')
-
-    # Calculate the modulo values for m1 and m2
-    m1_mod = m1_grid % p[0]
-    m2_mod = m2_grid % p[1]
-
-    # Compute powers of (m1 - mu[0])/p[0] and (m2 - mu[1])/p[1]
-    m1_diff = (m1_grid - mu[0]) / p[0]
-    m2_diff = (m2_grid - mu[1]) / p[1]
-
-    # Calculate the exponential terms
-    exp_term_m1 = torch.exp(-1j * torch.pi * m1_grid / p[0])
-    exp_term_m2 = torch.exp(-1j * torch.pi * m2_grid / p[1])
-
-    # Broadcast the exponential terms to match the shape of Ctil
-    exp_term_m1 = exp_term_m1.unsqueeze(-1).unsqueeze(-1)
-    exp_term_m2 = exp_term_m2.unsqueeze(-1).unsqueeze(-1)
-
-    # Compute the powers of (m1 - mu[0])/p[0] and (m2 - mu[1])/p[1]
-    m1_powers = m1_diff.unsqueeze(-1).unsqueeze(-1) ** torch.arange(r[0]).view(1, 1, r[0], 1).to(device)
-    m2_powers = m2_diff.unsqueeze(-1).unsqueeze(-1) ** torch.arange(r[1]).view(1, 1, 1, r[1]).to(device)
+    if device is None:
+        device = Z.device
     
-    precomputed_prod = m1_powers * exp_term_m1 * m2_powers * exp_term_m2
-    
-    return Z, m1_mod, m2_mod, precomputed_prod
+    # --- reshape Z to (p1, p2, q1, q2) ---
+    Z = (
+        Z.view(p[0], q[0], p[1], q[1])
+         .permute(0, 2, 1, 3)
+         .contiguous()
+    )
 
-def pft2d_computation(Z, B, m1_mod, m2_mod, precomputed_prod, device='cpu'):
+    # real dtype for forming polynomial powers
+    real_dtype = Z.real.dtype
+
+    # --- 1-D m ranges: mu_d - M_d ... mu_d + M_d (inclusive) ---
+    m1_vals = torch.arange(mu[0] - M[0], mu[0] + M[0], device=device)
+    m2_vals = torch.arange(mu[1] - M[1], mu[1] + M[1], device=device)
+
+    # modulo indices into the FFT grid (handle negatives correctly)
+    m1_mod = torch.remainder(m1_vals, p[0]).to(torch.long)
+    m2_mod = torch.remainder(m2_vals, p[1]).to(torch.long)
+
+    # --- Compact factors per dim: F_d[l, j] = ((m_d - mu_d)/p_d)^j * exp(-pi i m_d/p_d) ---
+    a1 = (m1_vals - mu[0]).to(real_dtype) / float(p[0])  # (L1,)
+    a2 = (m2_vals - mu[1]).to(real_dtype) / float(p[1])  # (L2,)
+
+    j1 = torch.arange(r[0], device=device, dtype=real_dtype)
+    j2 = torch.arange(r[1], device=device, dtype=real_dtype)
+
+    # polynomial terms
+    P1 = torch.pow(a1.unsqueeze(1), j1.unsqueeze(0))  # (L1, r1)
+    P2 = torch.pow(a2.unsqueeze(1), j2.unsqueeze(0))  # (L2, r2)
+
+    # exponential phase terms
+    E1 = torch.exp(-1j * torch.pi * m1_vals / float(p[0])).to(dtype).unsqueeze(1)
+    E2 = torch.exp(-1j * torch.pi * m2_vals / float(p[1])).to(dtype).unsqueeze(1)
+
+    # compact per-dimension factors
+    F1 = P1.to(dtype) * E1  # (L1, r1)
+    F2 = P2.to(dtype) * E2  # (L2, r2)
+
+    return Z, m1_mod, m2_mod, F1, F2
+
+def pft2d_computation(Z, B, m1_mod, m2_mod, F1, F2, device='cpu', dtype=torch.complex64):
     """
     Perform the 2D Partial Fourier Transform (PFT) using precomputed matrices and values.
 
@@ -131,28 +159,53 @@ def pft2d_computation(Z, B, m1_mod, m2_mod, precomputed_prod, device='cpu'):
     Fourier transforms, and element-wise operations to produce the final PFT result.
 
     Parameters:
-        Z (torch.Tensor): Input tensor that has been preprocessed and reshaped for the PFT.
-        B (list of torch.Tensor): Precomputed B matrices (B1 and B2) used in the PFT.
-        m1_mod (torch.Tensor): Modulo values for the first dimension.
-        m2_mod (torch.Tensor): Modulo values for the second dimension.
-        precomputed_prod (torch.Tensor): Precomputed product of exponential terms and powers for both dimensions.
-        device (str): Device to perform the computations on ('cpu' or 'cuda').
+        Z (torch.Tensor):
+            Preprocessed input tensor of shape (p1, p2, q1, q2).
+        B (list[torch.Tensor]):
+            List [B1, B2] of basis matrices with shapes:
+              - B1: (q1, r1)
+              - B2: (q2, r2)
+        m1_mod (torch.Tensor):
+            1D tensor of length L1 containing modulo-p1 frequency indices.
+        m2_mod (torch.Tensor):
+            1D tensor of length L2 containing modulo-p2 frequency indices.
+        F1 (torch.Tensor):
+            Tensor of shape (L1, r1) containing precomputed factors
+            for the first dimension.
+        F2 (torch.Tensor):
+            Tensor of shape (L2, r2) containing precomputed factors
+            for the second dimension.
 
     Returns:
-        pft_array (torch.Tensor): The resulting 2D Partial Fourier Transform array.
+        pft_array (torch.Tensor):
+            The resulting 2D Partial Fourier Transform array of shape (L1, L2).
     """
+
+    # enforce dtype/device
+    Z  = Z.to(device=device, dtype=dtype)
+    B0 = B[0].to(device=device, dtype=dtype)
+    B1 = B[1].to(device=device, dtype=dtype)
+    F1 = F1.to(device=device, dtype=dtype)
+    F2 = F2.to(device=device, dtype=dtype)
     
-    # Compute the matrix multiplication B1^T * Z * B2
-    # Let N = N1*N2, M = M1*M2, p = p1*p2, q = q1*q2, r = r1*r2
-    # NOTE: Associativity of matmul allows one to choose the parenthesization with lower cost!
-    C = torch.matmul(torch.matmul(B[0].t(), Z), B[1]) # Cost: O(r * N)
-    
-    # Apply 2D FFT on the computed matrix C
-    # The 2D FFT is applied across the first two dimensions (0 and 1)
-    Ctil = torch.fft.fft2(C, dim=(0, 1)) # Cost: O(r * p log p)
-    
-    # Perform element-wise multiplication of Ctil with precomputed_prod (i.e. Hadamard product),
-    # and sum the results over the last two dimensions (2 and 3)
-    pft_array = torch.sum(Ctil[m1_mod, m2_mod] * precomputed_prod, dim=(2, 3)).to(device) 
-    
+    # --- 1) Compute C = B1^T * Z * B2 ---
+    # Contract q1 with B[0]: (p1,p2,q1,q2) -> (p1,p2,r1,q2)
+    C = torch.tensordot(Z, B[0], dims=([2], [0]))   # (p1,p2,q2,r1)
+    C = C.permute(0, 1, 3, 2).contiguous()          # (p1,p2,r1,q2)
+
+    # Contract q2 with B[1]: -> (p1,p2,r1,r2)
+    C = torch.tensordot(C, B[1], dims=([3], [0]))   # (p1,p2,r1,r2)
+
+    # --- 2) 2D FFT over the p-dimensions ---
+    Ctil = torch.fft.fft2(C, dim=(0, 1))            # (p1,p2,r1,r2)
+
+    # --- 3) Gather desired frequency indices ---
+    A = Ctil.index_select(0, m1_mod).index_select(1, m2_mod)
+    # A: (L1,L2,r1,r2)
+
+    # --- 4) Contract with compact factors ---
+    # Equivalent to sum_{j1,j2} A * F1 * F2, but done in two steps
+    T = torch.einsum('abij,ai->abj', A, F1)          # (L1,L2,r2)
+    pft_array = torch.einsum('abj,bj->ab', T, F2)   # (L1,L2)
+
     return pft_array

@@ -1,3 +1,7 @@
+# Comment the following two lines if unnecessary
+import os    
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
+
 from src.create_probes import *
 from src.PFT2D import *
 from src.create_data import *
@@ -100,7 +104,7 @@ b_crop = create_cropped_data(z_true, probes, n_probes, nx, nx, N, M, isBlind=Fal
 z_temp = probes[0,:,:]*z_true.view(nx,nx)
 
 B, p, q, r = pft2d_configuration(N, M, mu, p, error, device=device)
-z, m1_mod, m2_mod, precomputed_prod = pft2d_precompute(z_temp, M, mu, p, q, r, device=device)
+z, m1_mod, m2_mod, F1, F2 = pft2d_precompute(z_temp, M, mu, p, q, r, device=device)
 print(f"N, M = {N[0], N[1]}, {M[0], M[1]} // p, q, r = {p}, {q}, {r} // e = {error}")
 
 del z_temp
@@ -118,7 +122,8 @@ pft_params = {
     "q": q,
     "m1_mod": m1_mod,
     "m2_mod": m2_mod,
-    "precomputed_prod": precomputed_prod
+    "F1": F1,
+    "F2": F2
 }
 
 PIE_params = {
