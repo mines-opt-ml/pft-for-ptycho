@@ -8,6 +8,10 @@ FFT (512 x 512)            |  PFT (128 x 128)
 In addition to ptychography experiments utilizing the PFT, this repository provides a PyTorch implementation 
 of the PFT found in https://github.com/snudatalab/PFT originally implemented in C++.
 
+This repository also provides a Pytorch implementation of the more recent Auto-MPFT found in 
+https://github.com/snudatalab/Auto-MPFT/tree/main originally implemented in C++. However, the experiments in this 
+repository make use exclusively of the two-dimensional PFT introduced in the original work.
+
 ## Associated Publications
 
 ### Fast Partial Fourier Transforms for Large-Scale Ptychography
